@@ -5,16 +5,22 @@
 #m input,#m select,#m button{font-size:18px;padding:10px;border-radius:8px;border:0}#m button{background:#d33;color:#fff}</style></head><body>
 <div id="m"><h1>🪝 Hook'n'Chew</h1>
 <select id="mode"><option value="coop">Coopératif (1 à 4 joueurs)</option><option value="pvp">PvP (chacun pour soi)</option></select>
-<input id="room" placeholder="Code de salle (vide = solo)"><button id="go">Jouer</button><div id="err"></div></div>
+<input id="room" placeholder="Code de salle (vide = solo)"><input id="srv" placeholder="Adresse du serveur (ex: 192.168.1.20:3000)"><button id="go">Jouer</button><div id="err"></div></div>
 <canvas id="c"></canvas>
 <script>
 const c=document.getElementById('c'),g=c.getContext('2d'),$=id=>document.getElementById(id);
 let ws,me,W=1600,H=1200,mode,S={p:[],m:[]},D={},joy=null,key={};
 const rs=()=>{c.width=innerWidth;c.height=innerHeight};rs();onresize=rs;
+if(location.host)$('srv').style.display='none';
 
 $('go').onclick=()=>{
   const room=$('room').value.trim()||('solo'+Math.random().toString(36).slice(2,8));
-  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/?room='+encodeURIComponent(room)+'&mode='+$('mode').value);
+  const host=location.host||$('srv').value.trim();
+  if(!host){$('err').textContent='Indique l\'adresse du serveur (ex: localhost:3000)';return}
+  $('err').textContent='';
+  try{ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+host+'/?room='+encodeURIComponent(room)+'&mode='+$('mode').value)}
+  catch(x){$('err').textContent='Adresse invalide';return}
+  ws.onerror=()=>{$('err').textContent='Connexion impossible : le serveur est-il lancé ?'};
   ws.onmessage=e=>{const d=JSON.parse(e.data);
     if(d.err){$('err').textContent=d.err;return}
     if(d.you){me=d.you;W=d.W;H=d.H;mode=d.mode;$('m').style.display='none';return}
@@ -38,6 +44,30 @@ setInterval(()=>{
 const sm=(k,e)=>{const o=D[k];if(!o)return{x:e.x,y:e.y};return{x:o.x+(e.x-o.x)*.35,y:o.y+(e.y-o.y)*.35}};
 function bar(x,y,w,r,col){g.fillStyle='#000a';g.fillRect(x-w/2,y,w,5);g.fillStyle=col;g.fillRect(x-w/2,y,w*Math.max(0,r),5)}
 
+const F={};
+function drawButcher(o,p){
+  const dead=p.hp<=0,t=performance.now()/1000,hue=p.id*70%360,f=F[p.id]||(F[p.id]={x:o.x,y:o.y,a:0});
+  if(Math.hypot(o.x-f.x,o.y-f.y)>.6)f.a=Math.atan2(o.y-f.y,o.x-f.x);f.x=o.x;f.y=o.y;
+  const hit=p.t&&!dead,a=hit?Math.atan2(p.t.y-o.y,p.t.x-o.x):f.a,sw=hit?Math.sin(t*22)*.7:0;
+  g.save();g.globalAlpha=dead?.3:1;g.translate(o.x,o.y);
+  if(hit){const tx=p.t.x-o.x,ty=p.t.y-o.y;
+    g.strokeStyle='#bbb';g.lineWidth=2;g.setLineDash([6,4]);g.beginPath();g.moveTo(0,0);g.lineTo(tx,ty);g.stroke();g.setLineDash([]);
+    g.strokeStyle='#eee';g.lineWidth=3;g.beginPath();g.arc(tx,ty,6,0,4.5);g.stroke()} // chaîne + crochet
+  g.fillStyle='#0005';g.beginPath();g.ellipse(0,18,16,6,0,0,7);g.fill(); // ombre
+  g.save();g.rotate(a+sw); // couteau de boucher
+  g.fillStyle='#6b4a2b';g.fillRect(8,-2,10,4);
+  g.fillStyle='#cfd6dd';g.fillRect(18,-9,14,14);g.strokeStyle='#8a929a';g.lineWidth=1.5;g.strokeRect(18,-9,14,14);
+  g.restore();
+  g.fillStyle=`hsl(${hue},70%,45%)`;g.beginPath();g.ellipse(0,4,14,16,0,0,7);g.fill(); // corps
+  g.fillStyle='#f4f1ea';g.fillRect(-9,0,18,16); // tablier
+  g.fillStyle='#b3262b';g.fillRect(-3,4,2,5);g.fillRect(3,8,2,3); // taches de sang
+  g.fillStyle='#f0c9a0';g.beginPath();g.arc(0,-12,10,0,7);g.fill(); // tête
+  g.fillStyle=`hsl(${hue},80%,35%)`;g.beginPath();g.arc(0,-15,10,Math.PI,0);g.fill();g.fillRect(-10,-16,20,3); // bonnet
+  g.fillStyle='#222';g.fillRect(-5,-11,3,3);g.fillRect(2,-11,3,3); // yeux
+  if(p.id===me){g.strokeStyle='#fff';g.lineWidth=2;g.beginPath();g.arc(0,2,25,0,7);g.stroke()}
+  g.restore();
+  g.globalAlpha=dead?.3:1;bar(o.x,o.y-34,36,p.hp/p.max,'#4d4');g.globalAlpha=1;
+}
 (function loop(){
   requestAnimationFrame(loop);
   g.fillStyle='#14141c';g.fillRect(0,0,c.width,c.height);
@@ -46,13 +76,7 @@ function bar(x,y,w,r,col){g.fillStyle='#000a';g.fillRect(x-w/2,y,w,5);g.fillStyl
   g.save();g.translate(c.width/2-self.x,c.height/2-self.y);
   g.strokeStyle='#44f';g.lineWidth=4;g.strokeRect(0,0,W,H);
   for(const m of S.m){const o=N['m'+m.id];g.fillStyle='#b22';g.beginPath();g.arc(o.x,o.y,14,0,7);g.fill();bar(o.x,o.y-24,28,m.r,'#e44')}
-  for(const p of S.p){
-    const o=N['p'+p.id],dead=p.hp<=0;g.globalAlpha=dead?.25:1;
-    if(p.t&&!dead){g.strokeStyle='#ddd';g.lineWidth=2;g.beginPath();g.moveTo(o.x,o.y);g.lineTo(p.t.x,p.t.y);g.stroke()}
-    g.fillStyle=`hsl(${p.id*70%360},80%,55%)`;g.beginPath();g.arc(o.x,o.y,17,0,7);g.fill();
-    if(p.id===me){g.strokeStyle='#fff';g.lineWidth=3;g.stroke()}
-    bar(o.x,o.y-28,36,p.hp/p.max,'#4d4');g.globalAlpha=1;
-  }
+  for(const p of S.p)drawButcher(N['p'+p.id],p);
   g.restore();
   if(joy){g.strokeStyle='#fff6';g.lineWidth=3;g.beginPath();g.arc(joy.x,joy.y,50,0,7);g.stroke();g.fillStyle='#fff5';g.beginPath();g.arc(joy.cx,joy.cy,22,0,7);g.fill()}
   g.fillStyle='#fff';g.font='16px sans-serif';
